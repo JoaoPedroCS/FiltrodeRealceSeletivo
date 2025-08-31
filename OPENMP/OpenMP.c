@@ -132,9 +132,6 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    double end_time = omp_get_wtime();
-    printf("Tempo de processamento do filtro: %f segundos\n", end_time - start_time);
-
     // --------------------------------------------------------------------------
     // 3. ESCRITA DO ARQUIVO DE SAÍDA (SEQUENCIAL)
     // --------------------------------------------------------------------------
@@ -151,6 +148,9 @@ int main(int argc, char *argv[]) {
         fprintf(outputFile, "%d %d %d\n", final_image[i].r, final_image[i].g, final_image[i].b);
     }
     fclose(outputFile);
+
+    double end_time = omp_get_wtime();
+    printf("Tempo de processamento do filtro: %f segundos\n", end_time - start_time);
 
     // 4. LIBERAÇÃO DE MEMÓRIA (SEQUENCIAL)
     free(original_image);
