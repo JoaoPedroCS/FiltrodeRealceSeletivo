@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <time.h>
 
 // Estrutura para representar um pixel RGB
 typedef struct {
@@ -16,6 +17,9 @@ unsigned char clamp(int value) {
 }
 
 int main(int argc, char *argv[]) {
+    clock_t inicio, fim;
+    double tempo_gasto;
+    inicio = clock();
     // 1. VERIFICAÇÃO E PROCESSAMENTO DOS ARGUMENTOS DE LINHA DE COMANDO
     if (argc != 6) {
         fprintf(stderr, "Erro: Número incorreto de argumentos.\n");
@@ -166,6 +170,13 @@ int main(int argc, char *argv[]) {
         fprintf(outputFile, "%d %d %d\n", final_image[i].r, final_image[i].g, final_image[i].b);
     }
     fclose(outputFile);
+
+    fim = clock();
+
+    // Calcula a diferença e converte para segundos
+    tempo_gasto = ((double)(fim - inicio)) / CLOCKS_PER_SEC;
+
+    printf("Tempo de CPU usado: %f segundos\n", tempo_gasto);
 
     // 4. LIBERAÇÃO DE MEMÓRIA
     free(original_image);
