@@ -176,7 +176,7 @@ int main(int argc, char *argv[]) {
     // Calcula a diferença e converte para segundos
     tempo_gasto = ((double)(fim - inicio)) / CLOCKS_PER_SEC;
 
-    printf("Tempo de CPU usado: %f segundos\n", tempo_gasto);
+    printf("Tempo: %f segundos\n", tempo_gasto);
 
     // 4. LIBERAÇÃO DE MEMÓRIA
     free(original_image);
