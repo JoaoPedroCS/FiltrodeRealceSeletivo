@@ -35,7 +35,7 @@ typedef struct {
     int width;
     int height;
     int limiar;
-    double alpha;
+    double sharpen_Factor;
 } sharpen_args_t;
 
 typedef struct {
@@ -64,7 +64,7 @@ int main(int argc, char **argv) {
     const char *outfile = argv[2];
     int M = atoi(argv[3]);
     int threshold = atoi(argv[4]);
-    double alpha = atof(argv[5]);
+    double sharpen_Factor = atof(argv[5]);
     int thread_count = atoi(argv[6]);
 
     if (M <= 0) { fprintf(stderr, "M deve ser > 0\n"); return 1; }
@@ -117,18 +117,36 @@ int main(int argc, char **argv) {
     pthread_t* thread_handles = malloc(thread_count * sizeof(pthread_t));
 
     // ETAPA 1: Blur
+
     blur_args_t* blur_args = malloc(thread_count * sizeof(blur_args_t));
     for (long i = 0; i < thread_count; i++) {
-        blur_args[i] = (blur_args_t){i, thread_count, original_image, blurred_image, width, height, M};
+        //blur_args[i] = (blur_args_t){i, thread_count, original_image, blurred_image, width, height, M};
+        blur_args[i].rank = i;
+        blur_args[i].thread_count = thread_count;
+        blur_args[i].original_image = original_image;
+        blur_args[i].blurred_image = blurred_image;
+        blur_args[i].width = width;
+        blur_args[i].height = height;
+        blur_args[i].M = M;
+
         pthread_create(&thread_handles[i], NULL, apply_blur_thread, (void *)&blur_args[i]);
     }
     for (long i = 0; i < thread_count; i++) pthread_join(thread_handles[i], NULL);
     free(blur_args);
 
     // ETAPA 2: Sharpen
+
     sharpen_args_t* sharpen_args = malloc(thread_count * sizeof(sharpen_args_t));
     for (long i = 0; i < thread_count; i++) {
-        sharpen_args[i] = (sharpen_args_t){i, thread_count, original_image, blurred_image, sharpened_image, width, height, threshold, alpha};
+        sharpen_args[i].rank = i;
+        sharpen_args[i].thread_count = thread_count;
+        sharpen_args[i].original_image = original_image;
+        sharpen_args[i].blurred_image = blurred_image;
+        sharpen_args[i].sharpened_image = sharpened_image;
+        sharpen_args[i].width = width;
+        sharpen_args[i].height = height;
+        sharpen_args[i].limiar = threshold;
+        sharpen_args[i].sharpen_Factor = sharpen_Factor;
         pthread_create(&thread_handles[i], NULL, apply_sharpen_thread, (void *)&sharpen_args[i]);
     }
     for (long i = 0; i < thread_count; i++) pthread_join(thread_handles[i], NULL);
@@ -137,7 +155,11 @@ int main(int argc, char **argv) {
     // ETAPA 3: Grayscale
     grayscale_args_t* gray_args = malloc(thread_count * sizeof(grayscale_args_t));
     for (long i = 0; i < thread_count; i++) {
-        gray_args[i] = (grayscale_args_t){i, thread_count, sharpened_image, final_gray, npix};
+        gray_args[i].rank = i;
+        gray_args[i].thread_count = thread_count;
+        gray_args[i].sharpened_image = sharpened_image;
+        gray_args[i].final_gray_output= final_gray;
+        gray_args[i].npix = npix;
         pthread_create(&thread_handles[i], NULL, convert_to_grayscale_thread, (void *)&gray_args[i]);
     }
     for (long i = 0; i < thread_count; i++) pthread_join(thread_handles[i], NULL);
@@ -147,14 +169,16 @@ int main(int argc, char **argv) {
     // --- Fim do Processamento Paralelo ---
 
     // Escrita do arquivo de saída
-    FILE *fo = fopen(outfile, "w");
-    if (!fo) { perror("fopen saida"); return 1; }
-    fprintf(fo, "P3\n%d %d\n255\n", width, height);
+    FILE *file = fopen(outfile, "w");
+    if (!file) { perror("fopen saida"); return 1; }
+    fprintf(file, "P3\n%d %d\n255\n", width, height);
     for (long i = 0; i < npix; ++i) {
-        fprintf(fo, "%d %d %d ", final_gray[i], final_gray[i], final_gray[i]);
-        if ((i + 1) % width == 0) fprintf(fo, "\n");
+        fprintf(file, "%d %d %d ", final_gray[i], final_gray[i], final_gray[i]);
+        if ((i + 1) % width == 0){
+            fprintf(file, "\n");
+        } 
     }
-    fclose(fo);
+    fclose(file);
 
     free(original_image);
     free(blurred_image);
@@ -225,9 +249,12 @@ void* apply_sharpen_thread(void* args) {
 
     for (long long i = my_first_i; i < my_last_i; ++i) {
         if (p_args->original_image[i].r > p_args->limiar) {
-            double new_r = p_args->original_image[i].r + p_args->alpha * (p_args->original_image[i].r - p_args->blurred_image[i].r);
-            double new_g = p_args->original_image[i].g + p_args->alpha * (p_args->original_image[i].g - p_args->blurred_image[i].g);
-            double new_b = p_args->original_image[i].b + p_args->alpha * (p_args->original_image[i].b - p_args->blurred_image[i].b);
+            double new_r = p_args->original_image[i].r + p_args->sharpen_Factor
+     * (p_args->original_image[i].r - p_args->blurred_image[i].r);
+            double new_g = p_args->original_image[i].g + p_args->sharpen_Factor
+     * (p_args->original_image[i].g - p_args->blurred_image[i].g);
+            double new_b = p_args->original_image[i].b + p_args->sharpen_Factor
+     * (p_args->original_image[i].b - p_args->blurred_image[i].b);
             p_args->sharpened_image[i].r = clamp_char((int)round(new_r));
             p_args->sharpened_image[i].g = clamp_char((int)round(new_g));
             p_args->sharpened_image[i].b = clamp_char((int)round(new_b));
