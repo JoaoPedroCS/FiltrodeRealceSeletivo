@@ -1,6 +1,6 @@
-/* 
+/*
 E.P 2 - Filtro de Realce Seletivo
- > Paralelização em CUDA
+> Versão Sequencial
 
 João Pedro Corrêa Silva	        				R.A: 11202321629
 João Pedro Sousa Bianchim		    			R.A: 11201920729
@@ -8,25 +8,24 @@ Thiago Vinícius Pereira Graciano de Souza   	R.A: 11201722589
 
 Professor: Emílio Francesquini
 */
-
+#include <ctype.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <ctype.h>
-#include <math.h>
 
-// Estrutura RGB
+// Estrutura p pixel RGB
 typedef struct {
     unsigned char r, g, b;
 } Pixel;
-
-static inline unsigned char clamp_char(int v) {
-    if (v < 0) return 0;
-    if (v > 255) return 255;
-    return (unsigned char)v;
+// Garante que um vlor inteiro permaneça no intervalo correto
+static inline unsigned char clamp_byte(int value) {
+    if (value < 0) return 0;
+    if (value > 255) return 255;
+    return (unsigned char)value;
 }
 
-// Lê o next int
+// Lê o próximo número inteiro de um arquivo considerando foras de padrão
 int read_next_int(FILE *f, int *out) {
     int c;
     while ((c = fgetc(f)) != EOF) {
@@ -37,14 +36,16 @@ int read_next_int(FILE *f, int *out) {
         }
         ungetc(c, f);
         if (fscanf(f, "%d", out) == 1) return 1;
-        return 1;
+        return 0; //falha na leitura
     }
     return 0;
 }
 
+
+
 int main(int argc, char **argv) {
     if (argc != 6) {
-        fprintf(stderr, "6 argumentos, ex: %s IN.ppm OUT.ppm 7 180 1.2\n", argv[0]);
+        fprintf(stderr, "Uso: %s IN.ppm OUT.ppm M(int) limiar(int) fator_sharpen(float)\n", argv[0]);
         return 1;
     }
 
@@ -54,140 +55,131 @@ int main(int argc, char **argv) {
     int threshold = atoi(argv[4]);
     double alpha = atof(argv[5]);
 
-    if (M <= 0) { fprintf(stderr, "M deve ser positivo !=0\n"); return 1; }
+    if (M <= 0) {
+        fprintf(stderr, "Erro: M deve ser um número positivo.\n");
+        return 1;
+    }
 
     FILE *fin = fopen(infile, "r");
-    if (!fin) { perror("fopen entrada"); return 1; }
+    if (!fin) {
+        perror("Não foi possível abrir o arquivo de entrada");
+        return 1;
+    }
 
-    char magic[3] = {0};
+    char magic[3];
     if (fscanf(fin, "%2s", magic) != 1 || strcmp(magic, "P3") != 0) {
-        fprintf(stderr, "Formato de entrada deve ser P3 (ASCII PPM)\n");
+        fprintf(stderr, "Não é PPM (P3).\n");
         fclose(fin);
         return 1;
     }
 
     int width, height, maxval;
     if (!read_next_int(fin, &width) || !read_next_int(fin, &height) || !read_next_int(fin, &maxval)) {
-        fprintf(stderr, "Erro lendo cabeçalho PPM (width/height/maxval)\n");
-        fclose(fin);
-        return 1;
-    }
-    if (width <= 0 || height <= 0 || maxval <= 0) {
-        fprintf(stderr, "Dimensões ou maxval inválidos\n");
+        fprintf(stderr, "Erro ao ler o cabeçalho\n");
         fclose(fin);
         return 1;
     }
 
-    long npix = width * height;
-    Pixel *original_image = malloc(npix * sizeof(Pixel));
-    Pixel *blurred_image = malloc(npix * sizeof(Pixel));
-    Pixel *sharpened_image = malloc(npix * sizeof(Pixel));
-    unsigned char *final_gray = malloc(npix * sizeof(unsigned char));
 
-    if (!original_image || !blurred_image || !sharpened_image || !final_gray) {
-        perror("malloc");
+    long total_pixels = width * height;
+    Pixel *image_original = malloc(total_pixels * sizeof(Pixel));
+    Pixel *image_blurred = malloc(total_pixels * sizeof(Pixel));
+    Pixel *image_sharpened = malloc(total_pixels * sizeof(Pixel));
+    unsigned char *image_final_gray = malloc(total_pixels * sizeof(unsigned char));
+    if (!image_original || !image_blurred || !image_sharpened || !image_final_gray) {
+        perror("Falha na alocação de memória para as imagens");
         fclose(fin);
-        // Libera o que foi alocado com sucesso
-        free(original_image); free(blurred_image); free(sharpened_image); free(final_gray);
+        free(image_original); free(image_blurred); free(image_sharpened); free(image_final_gray);
         return 1;
     }
 
-    // Ler pixels e normalizar se maxval != 255
-    for (long i = 0; i < npix; ++i) {
+    for (long i = 0; i < total_pixels; ++i) {
         int r, g, b;
         if (!read_next_int(fin, &r) || !read_next_int(fin, &g) || !read_next_int(fin, &b)) {
-            fprintf(stderr, "Erro lendo pixel %ld\n", i);
-            // ... (código de liberação de memória)
+            fprintf(stderr, "Erro ao ler o pixel %ld.\n", i);
+            fclose(fin);
+            free(image_original); free(image_blurred); free(image_sharpened); free(image_final_gray);
             return 1;
         }
-        if (maxval != 255) {
-            r = (int)round(r * 255.0 / maxval);
-            g = (int)round(g * 255.0 / maxval);
-            b = (int)round(b * 255.0 / maxval);
-        }
-        original_image[i].r = clamp_char(r);
-        original_image[i].g = clamp_char(g);
-        original_image[i].b = clamp_char(b);
+        image_original[i].r = (unsigned char)r;
+        image_original[i].g = (unsigned char)g;
+        image_original[i].b = (unsigned char)b;
     }
     fclose(fin);
 
-    // ETAPA 2: Blur de raio variável em cada canal de cor (R,G,B)
+    // blur de raio variável
     for (int y = 0; y < height; ++y) {
         for (int x = 0; x < width; ++x) {
             long idx = y * width + x;
-            int S = original_image[idx].r + original_image[idx].g + original_image[idx].b;
-            int radius = (S % M) + 1;
+            int rgb_sum = image_original[idx].r + image_original[idx].g + image_original[idx].b;
+            int radius = (rgb_sum % M) + 1;
 
             long sum_r = 0, sum_g = 0, sum_b = 0;
             int count = 0;
 
             for (int dy = -radius; dy <= radius; ++dy) {
                 for (int dx = -radius; dx <= radius; ++dx) {
-                    int nx = x + dx;
-                    int ny = y + dy;
-                    // Tratamento de borda: clamp (replicar a borda)
-                    if (nx < 0) nx = 0;
-                    if (ny < 0) ny = 0;
-                    if (nx >= width) nx = width - 1;
-                    if (ny >= height) ny = height - 1;
+                    int neighbor_x = x + dx;
+                    int neighbor_y = y + dy;
 
-                    long n_idx = ny * width + nx;
-                    sum_r += original_image[n_idx].r;
-                    sum_g += original_image[n_idx].g;
-                    sum_b += original_image[n_idx].b;
+                    // Trata as bordas da imagem
+                    if (neighbor_x < 0) neighbor_x = 0;
+                    if (neighbor_y < 0) neighbor_y = 0;
+                    if (neighbor_x >= width) neighbor_x = width - 1;
+                    if (neighbor_y >= height) neighbor_y = height - 1;
+
+                    long neighbor_idx = neighbor_y * width + neighbor_x;
+                    sum_r += image_original[neighbor_idx].r;
+                    sum_g += image_original[neighbor_idx].g;
+                    sum_b += image_original[neighbor_idx].b;
                     count++;
                 }
             }
-            blurred_image[idx].r = clamp_char((int)round((double)sum_r / count));
-            blurred_image[idx].g = clamp_char((int)round((double)sum_g / count));
-            blurred_image[idx].b = clamp_char((int)round((double)sum_b / count));
+            image_blurred[idx].r = clamp_byte((int)round((double)sum_r / count));
+            image_blurred[idx].g = clamp_byte((int)round((double)sum_g / count));
+            image_blurred[idx].b = clamp_byte((int)round((double)sum_b / count));
         }
     }
 
-    // ETAPA 3: Sharpen seletivo em cada canal de cor (R,G,B)
-    for (long i = 0; i < npix; ++i) {
-        if (original_image[i].r > threshold) {
-            double new_r = original_image[i].r + alpha * (original_image[i].r - blurred_image[i].r);
-            double new_g = original_image[i].g + alpha * (original_image[i].g - blurred_image[i].g);
-            double new_b = original_image[i].b + alpha * (original_image[i].b - blurred_image[i].b);
-            sharpened_image[i].r = clamp_char((int)round(new_r));
-            sharpened_image[i].g = clamp_char((int)round(new_g));
-            sharpened_image[i].b = clamp_char((int)round(new_b));
+    // Aplica um filtro de nitidez (sharpen) seletivo
+    for (long i = 0; i < total_pixels; ++i) {
+        if (image_original[i].r > threshold) {
+            double new_r = image_original[i].r + alpha * (image_original[i].r - image_blurred[i].r);
+            double new_g = image_original[i].g + alpha * (image_original[i].g - image_blurred[i].g);
+            double new_b = image_original[i].b + alpha * (image_original[i].b - image_blurred[i].b);
+            image_sharpened[i].r = clamp_byte((int)round(new_r));
+            image_sharpened[i].g = clamp_byte((int)round(new_g));
+            image_sharpened[i].b = clamp_byte((int)round(new_b));
         } else {
-            sharpened_image[i] = blurred_image[i];
+            image_sharpened[i] = image_blurred[i];
         }
     }
 
-    // ETAPA 4: Conversão final para tons de cinza
-    for (long i = 0; i < npix; ++i) {
-        int r = sharpened_image[i].r;
-        int g = sharpened_image[i].g;
-        int b = sharpened_image[i].b;
-        double y_val = 0.299 * r + 0.587 * g + 0.114 * b;
-        final_gray[i] = clamp_char((int)round(y_val));
+    // Converte a imagem final para tons de cinza, c fórmula de luminância
+    for (long i = 0; i < total_pixels; ++i) {
+        double luminance = 0.299 * image_sharpened[i].r + 0.587 * image_sharpened[i].g + 0.114 * image_sharpened[i].b;
+        image_final_gray[i] = clamp_byte((int)round(luminance));
     }
 
-    // Escreve o arquivo de saída P3 com R=G=B = valor de cinza
-    FILE *fo = fopen(outfile, "w");
-    if (!fo) {
-        perror("fopen saida");
-        // ... (código de liberação de memória)
+    FILE *fout = fopen(outfile, "w");
+    if (!fout) {
+        perror("Não foi possível criar o arquivo de saída");
+        free(image_original); free(image_blurred); free(image_sharpened); free(image_final_gray);
         return 1;
     }
-    fprintf(fo, "P3\n%d %d\n255\n", width, height);
-    for (long i = 0; i < npix; ++i) {
-        fprintf(fo, "%d %d %d ", final_gray[i], final_gray[i], final_gray[i]);
+
+    fprintf(fout, "P3\n%d %d\n255\n", width, height);
+    for (long i = 0; i < total_pixels; ++i) {
+        fprintf(fout, "%d %d %d ", image_final_gray[i], image_final_gray[i], image_final_gray[i]);
         if ((i + 1) % width == 0) {
-            fprintf(fo, "\n");
+            fprintf(fout, "\n");
         }
     }
-    fclose(fo);
-
-    // Liberação de memória
-    free(original_image);
-    free(blurred_image);
-    free(sharpened_image);
-    free(final_gray);
-
+    fclose(fout);
+    free(image_original);
+    free(image_blurred);
+    free(image_sharpened);
+    free(image_final_gray);
     return 0;
+
 }

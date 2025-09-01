@@ -109,7 +109,7 @@ __global__ void sharpen_kernel(const Pixel *orig, const Pixel *blur,
             out[i].g = clamp((int)new_g);
             out[i].b = clamp((int)new_b);
         } else {
-            out[i] = p;
+            out[i] = b;
         }
     }
 }
