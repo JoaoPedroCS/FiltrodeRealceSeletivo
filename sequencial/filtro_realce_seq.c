@@ -2,14 +2,13 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
-#include <time.h>
 
-// Estrutura para representar um pixel RGB
+// pixel RGB
 typedef struct {
     unsigned char r, g, b;
 } Pixel;
 
-// Função para garantir que um valor de cor permaneça no intervalo [0, 255]
+// manter no intervalo [0, 255]
 unsigned char clamp(int value) {
     if (value < 0) return 0;
     if (value > 255) return 255;
@@ -17,28 +16,19 @@ unsigned char clamp(int value) {
 }
 
 int main(int argc, char *argv[]) {
-    clock_t inicio, fim;
-    double tempo_gasto;
-    inicio = clock();
-    // 1. VERIFICAÇÃO E PROCESSAMENTO DOS ARGUMENTOS DE LINHA DE COMANDO
     if (argc != 6) {
         fprintf(stderr, "Erro: Número incorreto de argumentos.\n");
-        fprintf(stderr, "Uso: %s <input.ppm> <output.ppm> <M> <limiar> <sharpen_factor>\n", argv[0]);
-        fprintf(stderr, "Onde:\n");
-        fprintf(stderr, "  M:               Inteiro >= 1 para a fórmula do raio.\n");
-        fprintf(stderr, "  limiar:          Inteiro [0-255] para o critério de sharpen.\n");
-        fprintf(stderr, "  sharpen_factor:  Float para a intensidade do sharpen (ex: 1.2).\n");
         return 1;
     }
 
-    // Leitura dos nomes dos arquivos e parâmetros
+    // Leitura dos argumentos
     const char *input_filename = argv[1];
     const char *output_filename = argv[2];
     int M = atoi(argv[3]);
     int limiar = atoi(argv[4]);
     float sharpen_factor = atof(argv[5]);
 
-    // Validação dos parâmetros numéricos
+    // Vê se não teve erro nos parâmetros
     if (M < 1) {
         fprintf(stderr, "Erro: M deve ser um inteiro maior ou igual a 1.\n");
         return 1;
@@ -48,7 +38,7 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    // 2. ABERTURA E LEITURA DO ARQUIVO DE ENTRADA
+    // 2. Abre o arquivo
     FILE *inputFile = fopen(input_filename, "r");
     if (!inputFile) {
         perror("Erro ao abrir o arquivo de entrada");
@@ -60,7 +50,7 @@ int main(int argc, char *argv[]) {
     int width, height, max_val;
     fscanf(inputFile, "%2s", magic);
     if (strcmp(magic, "P3") != 0) {
-        fprintf(stderr, "Erro: O arquivo de entrada não é um PPM P3 válido.\n");
+        fprintf(stderr, "O arquivo de entrada não é um PPM P3 válido.\n");
         fclose(inputFile);
         return 1;
     }
@@ -75,9 +65,6 @@ int main(int argc, char *argv[]) {
 
     fscanf(inputFile, "%d %d %d", &width, &height, &max_val);
 
-    printf("Lendo imagem '%s' (%d x %d)...\n", input_filename, width, height);
-    printf("Parâmetros do filtro: M=%d, limiar=%d, sharpen_factor=%.2f\n", M, limiar, sharpen_factor);
-
     // Alocação de memória para as imagens
     Pixel *original_image = (Pixel *)malloc(width * height * sizeof(Pixel));
     unsigned char *grayscale_image = (unsigned char *)malloc(width * height * sizeof(unsigned char));
@@ -85,7 +72,7 @@ int main(int argc, char *argv[]) {
     Pixel *final_image = (Pixel *)malloc(width * height * sizeof(Pixel));
 
     if (!original_image || !grayscale_image || !blurred_image || !final_image) {
-        fprintf(stderr, "Erro: Falha ao alocar memória.\n");
+        fprintf(stderr, "Erro ao alocar memória.\n");
         free(original_image); free(grayscale_image); free(blurred_image); free(final_image);
         fclose(inputFile);
         return 1;
@@ -97,23 +84,20 @@ int main(int argc, char *argv[]) {
     fclose(inputFile);
 
     // --------------------------------------------------------------------------
-    // ETAPA 1: CONVERSÃO PARA TONS DE CINZA (GRAYSCALE)
+    // ETAPA 1: Conversão para tons de cinza
     // --------------------------------------------------------------------------
-    printf("Etapa 1: Convertendo para tons de cinza...\n");
     for (int i = 0; i < width * height; i++) {
         grayscale_image[i] = (unsigned char)(0.299 * original_image[i].r + 0.587 * original_image[i].g + 0.114 * original_image[i].b);
     }
 
     // --------------------------------------------------------------------------
-    // ETAPA 2: DESFOQUE DE RAIO VARIÁVEL (VARIABLE-RADIUS BLUR)
+    // ETAPA 2: Desfoque de raio variável
     // --------------------------------------------------------------------------
-    printf("Etapa 2: Aplicando desfoque de raio variável...\n");
     for (int y = 0; y < height; y++) {
         for (int x = 0; x < width; x++) {
             int current_pixel_idx = y * width + x;
             Pixel p_orig = original_image[current_pixel_idx];
 
-            // A fórmula do raio agora usa o parâmetro M
             int radius = ((p_orig.r + p_orig.g + p_orig.b) % M) + 1;
 
             long sum = 0;
@@ -133,9 +117,8 @@ int main(int argc, char *argv[]) {
     }
 
     // --------------------------------------------------------------------------
-    // ETAPA 3: AJUSTE SELETIVO (SHARPEN)
+    // ETAPA 3: Ajuste seletivo
     // --------------------------------------------------------------------------
-    printf("Etapa 3: Aplicando ajuste seletivo (sharpen)...\n");
     for (int i = 0; i < width * height; i++) {
         Pixel p_orig = original_image[i];
         unsigned char blurred_val = blurred_image[i];
@@ -157,7 +140,6 @@ int main(int argc, char *argv[]) {
     // --------------------------------------------------------------------------
     // 3. ESCRITA DO ARQUIVO DE SAÍDA
     // --------------------------------------------------------------------------
-    printf("Escrevendo imagem de saída em '%s'...\n", output_filename);
     FILE *outputFile = fopen(output_filename, "w");
     if (!outputFile) {
         perror("Erro ao criar o arquivo de saída");
@@ -171,14 +153,6 @@ int main(int argc, char *argv[]) {
     }
     fclose(outputFile);
 
-    fim = clock();
-
-    // Calcula a diferença e converte para segundos
-    tempo_gasto = ((double)(fim - inicio)) / CLOCKS_PER_SEC;
-
-    printf("Tempo: %f segundos\n", tempo_gasto);
-
-    // 4. LIBERAÇÃO DE MEMÓRIA
     free(original_image);
     free(grayscale_image);
     free(blurred_image);
