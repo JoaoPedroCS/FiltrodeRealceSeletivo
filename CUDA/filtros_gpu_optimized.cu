@@ -1,3 +1,14 @@
+/* 
+E.P 2 - Filtro de Realce Seletivo
+ > Paralelização em CUDA
+
+João Pedro Corrêa Silva	        				R.A: 11202321629
+João Pedro Sousa Bianchim		    			R.A: 11201920729
+Thiago Vinícius Pereira Graciano de Souza   	R.A: 11201722589
+
+Professor: Emílio Francesquini
+*/
+
 #include <cuda.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -7,23 +18,26 @@ typedef struct {
     unsigned char r, g, b;
 } Pixel;
 
-void Allocate_memmory(Pixel **d_original_p, unsigned char **d_grayscale_p, unsigned char **d_blurred_p,
+// Função que Aloca Memória na GPU
+void Allocate_memmory(Pixel **gpu_original_p, unsigned char **gpu_grayscale_p, unsigned char **gpu_blurred_p,
                       Pixel **d_final_p, int width, int height) {
     int n = width * height;
-    cudaMalloc((void **)d_original_p, n * sizeof(Pixel));
-    cudaMalloc((void **)d_grayscale_p, n * sizeof(unsigned char));
-    cudaMalloc((void **)d_blurred_p, n * sizeof(unsigned char));
+    cudaMalloc((void **)gpu_original_p, n * sizeof(Pixel));
+    cudaMalloc((void **)gpu_grayscale_p, n * sizeof(unsigned char));
+    cudaMalloc((void **)gpu_blurred_p, n * sizeof(unsigned char));
     cudaMalloc((void **)d_final_p, n * sizeof(Pixel));
 }
 
-void Free_vectors(Pixel **d_original_p, unsigned char **d_grayscale_p, unsigned char **d_blurred_p,
+// Função que Libera a memória alocada na GPU
+void Free_vectors(Pixel **gpu_original_p, unsigned char **gpu_grayscale_p, unsigned char **gpu_blurred_p,
                   Pixel **d_final_p) {
-    cudaFree(*d_original_p);
-    cudaFree(*d_grayscale_p);
-    cudaFree(*d_blurred_p);
+    cudaFree(*gpu_original_p);
+    cudaFree(*gpu_grayscale_p);
+    cudaFree(*gpu_blurred_p);
     cudaFree(*d_final_p);
 }
 
+// Função que executa o cálculo para transformação em gray scale (cada thread processa um pixel)
 __global__ void gray_scale_transformation(const Pixel *orig, unsigned char *gray, int n) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= n) return;
@@ -34,6 +48,7 @@ __global__ void gray_scale_transformation(const Pixel *orig, unsigned char *gray
     gray[idx] = (unsigned char)(0.299f * r + 0.587f * g + 0.114f * b);
 }
 
+// Função que executa o cálculo para transformação de blur (cada thread processa um pixel)
 __global__ void blur_transformation(const Pixel *orig, const unsigned char *gray,
                                     unsigned char *blur, int width, int height, int M) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -62,12 +77,14 @@ __global__ void blur_transformation(const Pixel *orig, const unsigned char *gray
     blur[idx] = (unsigned char)(sum / (count ? count : 1));
 }
 
+// Função para fazer o clamp e impedir valores diferentes dos permitidos para as cores
 __device__ unsigned char clamp(int v) {
     if (v < 0) return 0;
     if (v > 255) return 255;
     return (unsigned char)v;
 }
 
+// Função que executa o cálculo para transformação de sharpen (cada thread processa um pixel)
 __global__ void sharpen_kernel(const Pixel *orig, const unsigned char *blur,
                                Pixel *out, int n, int limiar, float sharpen_factor) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -93,12 +110,7 @@ __global__ void sharpen_kernel(const Pixel *orig, const unsigned char *blur,
 
 int main(int argc, char *argv[]) {
     if (argc != 6) {
-        fprintf(stderr, "Erro: Número incorreto de argumentos.\n");
-        fprintf(stderr, "Uso: %s <input.ppm> <output.ppm> <M> <limiar> <sharpen_factor>\n", argv[0]);
-        fprintf(stderr, "Onde:\n");
-        fprintf(stderr, "  M:               Inteiro >= 1 para a fórmula do raio.\n");
-        fprintf(stderr, "  limiar:          Inteiro [0-255] para o critério de sharpen.\n");
-        fprintf(stderr, "  sharpen_factor:  Float para a intensidade do sharpen (ex: 1.2).\n");
+        printf("Erro: Número incorreto de argumentos.\n");
         return 1;
     }
 
@@ -108,6 +120,8 @@ int main(int argc, char *argv[]) {
     int limiar = atoi(argv[4]);
     float sharpen_factor = atof(argv[5]);
 
+
+    // Abertura do arquivo
     if (M < 1) {
         fprintf(stderr, "Erro: M deve ser um inteiro maior ou igual a 1.\n");
         return 1;
@@ -116,8 +130,6 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "Erro: limiar deve ser um inteiro no intervalo [0, 255].\n");
         return 1;
     }
-
-    // 2. ABERTURA E LEITURA DO ARQUIVO DE ENTRADA
     FILE *inputFile = fopen(input_filename, "r");
     if (!inputFile) {
         perror("Erro ao abrir o arquivo de entrada");
@@ -151,20 +163,19 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    printf("Lendo imagem '%s' (%d x %d)...\n", input_filename, width, height);
-    printf("Parâmetros do filtro: M=%d, limiar=%d, sharpen_factor=%.2f\n", M, limiar, sharpen_factor);
-
     int n = width * height;
 
+    // Criação das matrizes para armazenar a imagem na CPU
     Pixel *cpu_original_image = (Pixel *)malloc(n * sizeof(Pixel));
     Pixel *cpu_final_image = (Pixel *)malloc(n * sizeof(Pixel));
 
+    // Leitura do arquivo
     for (int i = 0; i < width * height; i++) {
         fscanf(inputFile, "%hhu %hhu %hhu", &cpu_original_image[i].r, &cpu_original_image[i].g, &cpu_original_image[i].b);
     }    
     fclose(inputFile);
 
-    // Device buffers
+    // Cálculos na GPU
     Pixel *gpu_original_image, *gpu_final_image;
     unsigned char *gpu_grayscale_image, *gpu_blurred_image;
 
@@ -177,21 +188,16 @@ int main(int argc, char *argv[]) {
 
     gray_scale_transformation<<<blk_ct, th_per_blk>>>(gpu_original_image, gpu_grayscale_image, (int)n);
     cudaDeviceSynchronize();
-    printf("Fiz Gray Scale!\n");
 
     blur_transformation<<<blk_ct, th_per_blk>>>(gpu_original_image, gpu_grayscale_image, gpu_blurred_image, width, height, M);
     cudaDeviceSynchronize();
-    printf("Fiz Blur!\n");
 
     sharpen_kernel<<<blk_ct, th_per_blk>>>(gpu_original_image, gpu_blurred_image, gpu_final_image, (int)n, limiar, sharpen_factor);
-    cudaGetLastError();
     cudaDeviceSynchronize();
-    printf("Fiz Sharpen!\n");
 
-    // Copy device -> host
     cudaMemcpy(cpu_final_image, gpu_final_image, n * sizeof(Pixel), cudaMemcpyDeviceToHost);
 
-    printf("Escrevendo imagem de saída em '%s'...\n", output_filename);
+    //Escrita do Arquivo Final
     FILE *outputFile = fopen(output_filename, "w");
     if (!outputFile) {
         perror("Erro ao criar o arquivo de saída");
@@ -208,10 +214,10 @@ int main(int argc, char *argv[]) {
     }
     fclose(outputFile);
 
+    //Liberação de Memória
     Free_vectors(&gpu_original_image, &gpu_grayscale_image, &gpu_blurred_image, &gpu_final_image);
     free(cpu_original_image);
     free(cpu_final_image);
 
-    printf("Filtro aplicado com sucesso!\n");
     return 0;
 }
