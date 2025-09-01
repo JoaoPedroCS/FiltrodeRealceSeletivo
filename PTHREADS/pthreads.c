@@ -1,8 +1,13 @@
-// filtro_pthreads.c
-// Implementação paralela com Pthreads do filtro de realce seletivo.
-// Uso: ./filtro_pthreads entrada.ppm saida.ppm M limiar sharpen_factor num_threads
-// Ex:  ./filtro_pthreads in.ppm out.ppm 7 180 1.2 4
+/* 
+E.P 2 - Filtro de Realce Seletivo
+> Paralelização em Pthreads
 
+João Pedro Corrêa Silva	        				R.A: 11202321629
+João Pedro Sousa Bianchim		    			R.A: 11201920729
+Thiago Vinícius Pereira Graciano de Souza   	R.A: 11201722589
+
+Professor: Emílio Francesquini
+*/
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
