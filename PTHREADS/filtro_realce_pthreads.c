@@ -12,8 +12,9 @@ typedef struct {
 struct thread_cinza{
     int rank;
     int thread_count;
-    unsigned char *grayscale_image;
-    Pixel *original_image;
+    Pixel *grayscale_image;
+    //Pixel *original_image;
+    Pixel *final_image;
     int width;
     int height;
 };
@@ -21,8 +22,8 @@ struct thread_cinza{
 struct thread_blur{
     int rank;
     int thread_count;
-    unsigned char *blurred_image;
-    unsigned char *grayscale_image;
+    Pixel *blurred_image;
+    Pixel *grayscale_image;
     Pixel *original_image;
     int width;
     int height;
@@ -32,7 +33,7 @@ struct thread_blur{
 struct thread_sharpen{
     int rank;
     int thread_count;
-    unsigned char *blurred_image;
+    Pixel *blurred_image;
     Pixel *original_image;
     Pixel *final_image;
     int width;
@@ -59,9 +60,10 @@ void *cinza(void* input) {
     int my_last_row = (my_rank+1)*local_m - 1;
 
     for (i = my_first_row; i <= my_last_row; i++) {
-        ((struct thread_cinza*)input)->grayscale_image[i] = (unsigned char)(0.299 * ((struct thread_cinza*)input)->original_image[i].r 
-    + 0.587 * ((struct thread_cinza*)input)->original_image[i].g 
-    + 0.114 * ((struct thread_cinza*)input)->original_image[i].b);
+        unsigned char media = (0.299 * ((struct thread_cinza*)input)->final_image[i].r + 0.587 * ((struct thread_cinza*)input)->final_image[i].g + 0.114 * ((struct thread_cinza*)input)->final_image[i].b);
+        ((struct thread_cinza*)input)->grayscale_image[i].r = media;
+        ((struct thread_cinza*)input)->grayscale_image[i].g = media;
+        ((struct thread_cinza*)input)->grayscale_image[i].b = media;
     }
 
     return NULL;
@@ -80,19 +82,29 @@ void *blur(void* input){
             // A fórmula do raio agora usa o parâmetro M
             int radius = ((p_orig.r + p_orig.g + p_orig.b) % ((struct thread_blur*)input)->M) + 1;
 
-            long sum = 0;
+            //long sum = 0;
+            Pixel sum;
+            sum.r=0;
+            sum.g=0;
+            sum.b=0;
             int count = 0;
+            unsigned char temp = 'a';
             for (int j = -radius; j <= radius; j++) {
                 for (int i = -radius; i <= radius; i++) {
                     int neighbor_x = x + i;
                     int neighbor_y = y + j;
                     if (neighbor_x >= 0 && neighbor_x < width && neighbor_y >= 0 && neighbor_y < height) {
-                        sum += ((struct thread_cinza*)input)->grayscale_image[neighbor_y * width + neighbor_x];
+                        //sum += ((struct thread_cinza*)input)->grayscale_image[neighbor_y * width + neighbor_x];
+                        sum.r+= ((struct thread_blur*)input)->original_image[neighbor_y * width + neighbor_x].r;
+                        sum.g+= ((struct thread_blur*)input)->original_image[neighbor_y * width + neighbor_x].g;
+                        sum.b+= ((struct thread_blur*)input)->original_image[neighbor_y * width + neighbor_x].b;
                         count++;
                     }
                 }
             }
-            ((struct thread_blur*)input)->blurred_image[current_pixel_idx] = (unsigned char)(sum / count);
+            ((struct thread_blur*)input)->blurred_image[current_pixel_idx].r = (sum.r / count);//(unsigned char)(sum.r / count);
+            ((struct thread_blur*)input)->blurred_image[current_pixel_idx].g = (sum.g / count);
+            ((struct thread_blur*)input)->blurred_image[current_pixel_idx].b = (sum.b / count);
         }
     }
 
@@ -108,17 +120,23 @@ void* sharpen(void* input){
 
     for (int i = 0; i < width * height; i++) {
         Pixel p_orig = ((struct thread_sharpen*)input)->original_image[i];
-        unsigned char blurred_val = ((struct thread_sharpen*)input)->blurred_image[i];
+        Pixel blurred_val = ((struct thread_sharpen*)input)->blurred_image[i];
 
         // O critério e o fator de sharpen agora usam os parâmetros limiar e sharpen_factor
-        if (p_orig.r > limiar) {
-            float new_r = p_orig.r + sharpen_factor * (p_orig.r - blurred_val);
-            float new_g = p_orig.g + sharpen_factor * (p_orig.g - blurred_val);
-            float new_b = p_orig.b + sharpen_factor * (p_orig.b - blurred_val);
-            
-            ((struct thread_sharpen*)input)->final_image[i].r = clamp((int)round(new_r));
-            ((struct thread_sharpen*)input)->final_image[i].g = clamp((int)round(new_g));
-            ((struct thread_sharpen*)input)->final_image[i].b = clamp((int)round(new_b));
+        if (p_orig.r > limiar || p_orig.g > limiar || p_orig.b > limiar) {
+            if(p_orig.r > limiar){
+                float new_r = p_orig.r + sharpen_factor * (p_orig.r - blurred_val.r);
+                ((struct thread_sharpen*)input)->final_image[i].r = clamp((int)round(new_r));
+            }
+            if(p_orig.g > limiar){
+                float new_g = p_orig.g + sharpen_factor * (p_orig.g - blurred_val.g);
+                ((struct thread_sharpen*)input)->final_image[i].g = clamp((int)round(new_g));
+            }
+            if(p_orig.b > limiar){
+                float new_b = p_orig.b + sharpen_factor * (p_orig.b - blurred_val.b);
+                ((struct thread_sharpen*)input)->final_image[i].b = clamp((int)round(new_b));
+            }
+
         } else {
             ((struct thread_sharpen*)input)->final_image[i] = ((struct thread_sharpen*)input)->original_image[i];
         }
@@ -192,11 +210,12 @@ int main(int argc, char *argv[]) {
 
     printf("Lendo imagem '%s' (%d x %d)...\n", input_filename, width, height);
     printf("Parâmetros do filtro: M=%d, limiar=%d, sharpen_factor=%.2f\n", M, limiar, sharpen_factor);
+    printf("Número de threads: %d\n", thread_count);
 
     // Alocação de memória para as imagens
     Pixel *original_image = (Pixel *)malloc(width * height * sizeof(Pixel));
-    unsigned char *grayscale_image = (unsigned char *)malloc(width * height * sizeof(unsigned char));
-    unsigned char *blurred_image = (unsigned char *)malloc(width * height * sizeof(unsigned char));
+    Pixel *grayscale_image = (Pixel *)malloc(width * height * sizeof(Pixel));
+    Pixel *blurred_image = (Pixel *)malloc(width * height * sizeof(Pixel));
     Pixel *final_image = (Pixel *)malloc(width * height * sizeof(Pixel));
 
     if (!original_image || !grayscale_image || !blurred_image || !final_image) {
@@ -211,44 +230,15 @@ int main(int argc, char *argv[]) {
     }
     fclose(inputFile);
 
-    // --------------------------------------------------------------------------
-    // ETAPA 1: CONVERSÃO PARA TONS DE CINZA (GRAYSCALE)
-    // --------------------------------------------------------------------------
-    printf("Etapa 1: Convertendo para tons de cinza...\n");
-
-    /*
-    for (int i = 0; i < width * height; i++) {
-        grayscale_image[i] = (unsigned char)(0.299 * original_image[i].r + 0.587 * original_image[i].g + 0.114 * original_image[i].b);
-    }*/
-
     //variáveis para pthreads
     long thread;
     pthread_t* thread_handles = (pthread_t *)malloc(thread_count * sizeof(pthread_t));
     
-    struct thread_cinza args_cinza;// = (struct thread_cinza *)malloc(sizeof(struct thread_cinza));
-    args_cinza.grayscale_image = grayscale_image;
-    args_cinza.original_image = original_image;
-    args_cinza.width = width;
-    args_cinza.height = height;
-    args_cinza.thread_count = thread_count; 
-
-    for (thread = 0; thread < thread_count; thread++){
-        args_cinza.rank = thread;
-        //printf("pronto pra criar threads\n");
-        pthread_create(&thread_handles[thread], NULL,
-        cinza, (void *)&args_cinza);
-    }
-
-    for (thread = 0; thread < thread_count; thread++){
-        pthread_join(thread_handles[thread], NULL);
-    }
-    //printf("%s", (unsigned char)original_image[600][600]);
-    
 
     // --------------------------------------------------------------------------
-    // ETAPA 2: DESFOQUE DE RAIO VARIÁVEL (VARIABLE-RADIUS BLUR)
+    // ETAPA 1: DESFOQUE DE RAIO VARIÁVEL (VARIABLE-RADIUS BLUR)
     // --------------------------------------------------------------------------
-    printf("Etapa 2: Aplicando desfoque de raio variável...\n");
+    printf("Etapa 1: Aplicando desfoque de raio variável...\n");
     
     struct thread_blur args_blur;// = (struct thread_blur *)malloc(sizeof(struct thread_blur));
     args_blur.blurred_image = blurred_image;
@@ -273,9 +263,9 @@ int main(int argc, char *argv[]) {
     
 
     // --------------------------------------------------------------------------
-    // ETAPA 3: AJUSTE SELETIVO (SHARPEN)
+    // ETAPA 2: AJUSTE SELETIVO (SHARPEN)
     // --------------------------------------------------------------------------
-    printf("Etapa 3: Aplicando ajuste seletivo (sharpen)...\n");
+    printf("Etapa 2: Aplicando ajuste seletivo (sharpen)...\n");
 
     struct thread_sharpen args_sharpen;// = (struct thread_sharpen *)malloc(sizeof(struct thread_sharpen));
     args_sharpen.blurred_image = blurred_image;
@@ -299,6 +289,34 @@ int main(int argc, char *argv[]) {
         pthread_join(thread_handles[thread], NULL);
     }
     
+    // --------------------------------------------------------------------------
+    // ETAPA 3: CONVERSÃO PARA TONS DE CINZA (GRAYSCALE)
+    // --------------------------------------------------------------------------
+    printf("Etapa 3: Convertendo para tons de cinza...\n");
+
+    /*
+    for (int i = 0; i < width * height; i++) {
+        grayscale_image[i] = (unsigned char)(0.299 * original_image[i].r + 0.587 * original_image[i].g + 0.114 * original_image[i].b);
+    }*/
+    
+    struct thread_cinza args_cinza;// = (struct thread_cinza *)malloc(sizeof(struct thread_cinza));
+    args_cinza.grayscale_image = grayscale_image;
+    args_cinza.final_image = final_image;
+    args_cinza.width = width;
+    args_cinza.height = height;
+    args_cinza.thread_count = thread_count; 
+
+    for (thread = 0; thread < thread_count; thread++){
+        args_cinza.rank = thread;
+        //printf("pronto pra criar threads\n");
+        pthread_create(&thread_handles[thread], NULL,
+        cinza, (void *)&args_cinza);
+    }
+
+    for (thread = 0; thread < thread_count; thread++){
+        pthread_join(thread_handles[thread], NULL);
+    }
+    //printf("%s", (unsigned char)original_image[600][600]);
 
     // --------------------------------------------------------------------------
     // 3. ESCRITA DO ARQUIVO DE SAÍDA
@@ -313,7 +331,7 @@ int main(int argc, char *argv[]) {
 
     fprintf(outputFile, "P3\n%d %d\n%d\n", width, height, max_val);
     for (int i = 0; i < width * height; i++) {
-        fprintf(outputFile, "%d %d %d\n", final_image[i].r, final_image[i].g, final_image[i].b);
+        fprintf(outputFile, "%d %d %d\n", grayscale_image[i].r, grayscale_image[i].g, grayscale_image[i].b);
     }
     fclose(outputFile);
 
