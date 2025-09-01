@@ -216,8 +216,6 @@ int main(int argc, char *argv[]) {
     // --------------------------------------------------------------------------
     printf("Etapa 1: Convertendo para tons de cinza...\n");
 
-    //divide o trabalho em 4
-    //i mod 4
     /*
     for (int i = 0; i < width * height; i++) {
         grayscale_image[i] = (unsigned char)(0.299 * original_image[i].r + 0.587 * original_image[i].g + 0.114 * original_image[i].b);
@@ -227,24 +225,24 @@ int main(int argc, char *argv[]) {
     long thread;
     pthread_t* thread_handles = (pthread_t *)malloc(thread_count * sizeof(pthread_t));
     
-    struct thread_cinza *args_cinza = (struct thread_cinza *)malloc(sizeof(struct thread_cinza));
-    args_cinza->grayscale_image = grayscale_image;
-    args_cinza->original_image = original_image;
-    args_cinza->width = width;
-    args_cinza->height = height;
-    args_cinza->thread_count = thread_count; 
+    struct thread_cinza args_cinza;// = (struct thread_cinza *)malloc(sizeof(struct thread_cinza));
+    args_cinza.grayscale_image = grayscale_image;
+    args_cinza.original_image = original_image;
+    args_cinza.width = width;
+    args_cinza.height = height;
+    args_cinza.thread_count = thread_count; 
 
     for (thread = 0; thread < thread_count; thread++){
-        args_cinza->rank = thread;
+        args_cinza.rank = thread;
         //printf("pronto pra criar threads\n");
         pthread_create(&thread_handles[thread], NULL,
-        cinza, (void *)args_cinza);
+        cinza, (void *)&args_cinza);
     }
 
     for (thread = 0; thread < thread_count; thread++){
         pthread_join(thread_handles[thread], NULL);
     }
-    
+    //printf("%s", (unsigned char)original_image[600][600]);
     
 
     // --------------------------------------------------------------------------
@@ -252,21 +250,21 @@ int main(int argc, char *argv[]) {
     // --------------------------------------------------------------------------
     printf("Etapa 2: Aplicando desfoque de raio variável...\n");
     
-    struct thread_blur *args_blur = (struct thread_blur *)malloc(sizeof(struct thread_blur));
-    args_blur->blurred_image = blurred_image;
-    args_blur->grayscale_image = grayscale_image;
-    args_blur->original_image = original_image;
-    args_blur->width = width;
-    args_blur->height = height; 
-    args_blur->M = M;
-    args_blur->thread_count = thread_count;
+    struct thread_blur args_blur;// = (struct thread_blur *)malloc(sizeof(struct thread_blur));
+    args_blur.blurred_image = blurred_image;
+    args_blur.grayscale_image = grayscale_image;
+    args_blur.original_image = original_image;
+    args_blur.width = width;
+    args_blur.height = height; 
+    args_blur.M = M;
+    args_blur.thread_count = thread_count;
 
     
     for (thread = 0; thread < thread_count; thread++){
-        args_blur->rank = thread;
+        args_blur.rank = thread;
         //printf("pronto pra criar threads\n");
         pthread_create(&thread_handles[thread], NULL,
-        blur, (void *)args_blur);
+        blur, (void *)&args_blur);
     }
 
     for (thread = 0; thread < thread_count; thread++){
@@ -279,22 +277,22 @@ int main(int argc, char *argv[]) {
     // --------------------------------------------------------------------------
     printf("Etapa 3: Aplicando ajuste seletivo (sharpen)...\n");
 
-    struct thread_sharpen *args_sharpen = (struct thread_sharpen *)malloc(sizeof(struct thread_sharpen));
-    args_sharpen->blurred_image = blurred_image;
-    args_sharpen->original_image = original_image;
-    args_sharpen->final_image = final_image;
-    args_sharpen->width = width;
-    args_sharpen->height = height; 
-    args_sharpen->limiar = limiar;
-    args_sharpen->sharpen_factor = sharpen_factor;
-    args_sharpen->thread_count = thread_count;
+    struct thread_sharpen args_sharpen;// = (struct thread_sharpen *)malloc(sizeof(struct thread_sharpen));
+    args_sharpen.blurred_image = blurred_image;
+    args_sharpen.original_image = original_image;
+    args_sharpen.final_image = final_image;
+    args_sharpen.width = width;
+    args_sharpen.height = height; 
+    args_sharpen.limiar = limiar;
+    args_sharpen.sharpen_factor = sharpen_factor;
+    args_sharpen.thread_count = thread_count;
     
     
     for (thread = 0; thread < thread_count; thread++){
-        args_sharpen->rank = thread;
+        args_sharpen.rank = thread;
         //printf("pronto pra criar threads\n");
         pthread_create(&thread_handles[thread], NULL,
-        sharpen, (void *)args_blur);
+        sharpen, (void *)&args_sharpen);
     }
 
     for (thread = 0; thread < thread_count; thread++){
