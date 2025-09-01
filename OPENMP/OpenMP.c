@@ -119,11 +119,8 @@ int main(int argc, char **argv) {
     }
     fclose(fin);
 
-    double start_time = omp_get_wtime();
-
-    // O trabalho de aplicar o blur em cada pixel varia conforme o raio, que é dinâmico.
-    // Por isso, 'schedule(dynamic)' distribui as iterações do loop entre as threads
-    // de forma mais eficiente, evitando que threads fiquem ociosas.
+    // O raio do blur muda a cada pixel, então o trabalho de cada iteração é diferente.
+    // O schedule(dynamic) é essencial aqui pra balancear a carga entre as threads
     #pragma omp parallel for schedule(dynamic)
     for (int y = 0; y < height; ++y) {
         for (int x = 0; x < width; ++x) {
@@ -158,9 +155,8 @@ int main(int argc, char **argv) {
         }
     }
 
-    // O filtro de nitidez (sharpen) é aplicado independentemente em cada pixel.
-    // Um 'parallel for' simples é ideal aqui, pois o custo por pixel é uniforme
-    // e não há dependência de dados entre as iterações.
+    // O sharpen é basico, cada pixel é independente do outro.
+    // Um 'parallel for' simples já resolve bem.
     #pragma omp parallel for
     for (long i = 0; i < total_pixels; ++i) {
         if (image_original[i].r > threshold) {
@@ -175,22 +171,17 @@ int main(int argc, char **argv) {
         }
     }
 
-    // A conversão para tons de cinza também é uma operação feita pixel a pixel,
-    // sem dependências. O 'parallel for' divide o trabalho igualmente entre as
-    // threads disponíveis para acelerar o processo.
+    // Mesma lógica do sharpen: conversão pra cinza é pixel a pixel.
+    // É só dividir o loop entre as threads.
     #pragma omp parallel for
     for (long i = 0; i < total_pixels; ++i) {
         double luminance = 0.299 * image_sharpened[i].r + 0.587 * image_sharpened[i].g + 0.114 * image_sharpened[i].b;
         image_final_gray[i] = clamp_byte((int)round(luminance));
     }
 
-    double end_time = omp_get_wtime();
-    printf("Tempo de processamento (OpenMP): %f segundos\n", end_time - start_time);
-
     FILE *fout = fopen(outfile, "w");
     if (!fout) {
         perror("Não foi possível criar o arquivo de saída");
-        // Libera memória antes de sair
         free(image_original);
         free(image_blurred);
         free(image_sharpened);
