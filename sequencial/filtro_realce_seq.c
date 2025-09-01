@@ -2,14 +2,13 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
-#include <time.h>
 
-// Estrutura para representar um pixel RGB
+// pixel RGB
 typedef struct {
     unsigned char r, g, b;
 } Pixel;
 
-// Função para garantir que um valor de cor permaneça no intervalo [0, 255]
+// manter no intervalo [0, 255]
 unsigned char clamp(int value) {
     if (value < 0) return 0;
     if (value > 255) return 255;
@@ -17,17 +16,8 @@ unsigned char clamp(int value) {
 }
 
 int main(int argc, char *argv[]) {
-    clock_t inicio, fim;
-    double tempo_gasto;
-    inicio = clock();
-    // 1. VERIFICAÇÃO E PROCESSAMENTO DOS ARGUMENTOS DE LINHA DE COMANDO
     if (argc != 6) {
         fprintf(stderr, "Erro: Número incorreto de argumentos.\n");
-        fprintf(stderr, "Uso: %s <input.ppm> <output.ppm> <M> <limiar> <sharpen_factor>\n", argv[0]);
-        fprintf(stderr, "Onde:\n");
-        fprintf(stderr, "  M:               Inteiro >= 1 para a fórmula do raio.\n");
-        fprintf(stderr, "  limiar:          Inteiro [0-255] para o critério de sharpen.\n");
-        fprintf(stderr, "  sharpen_factor:  Float para a intensidade do sharpen (ex: 1.2).\n");
         return 1;
     }
 
@@ -171,14 +161,6 @@ int main(int argc, char *argv[]) {
     }
     fclose(outputFile);
 
-    fim = clock();
-
-    // Calcula a diferença e converte para segundos
-    tempo_gasto = ((double)(fim - inicio)) / CLOCKS_PER_SEC;
-
-    printf("Tempo: %f segundos\n", tempo_gasto);
-
-    // 4. LIBERAÇÃO DE MEMÓRIA
     free(original_image);
     free(grayscale_image);
     free(blurred_image);
