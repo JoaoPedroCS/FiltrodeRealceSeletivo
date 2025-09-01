@@ -1,164 +1,216 @@
+/* 
+E.P 2 - Filtro de Realce Seletivo
+> Paralelização em OpenMP
+
+João Pedro Corrêa Silva	        				R.A: 11202321629
+João Pedro Sousa Bianchim		    			R.A: 11201920729
+Thiago Vinícius Pereira Graciano de Souza   	R.A: 11201722589
+
+Professor: Emílio Francesquini
+*/
+#include <ctype.h>
+#include <math.h>
+#include <omp.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <math.h>
-#include <omp.h> // Header para OpenMP
 
-// Estrutura para representar um pixel RGB
+// Aqui o inicio é igual do openMP, então sem mais delongas
 typedef struct {
     unsigned char r, g, b;
 } Pixel;
-
-// Função para garantir que um valor de cor permaneça no intervalo [0, 255]
-unsigned char clamp(int value) {
+static inline unsigned char clamp_byte(int value) {
     if (value < 0) return 0;
     if (value > 255) return 255;
     return (unsigned char)value;
 }
 
-int main(int argc, char *argv[]) {
-    // 1. VERIFICAÇÃO E PROCESSAMENTO DOS ARGUMENTOS (SEQUENCIAL)
-    if (argc != 6) {
-        fprintf(stderr, "Erro: Número incorreto de argumentos.\n");
-        fprintf(stderr, "Uso: %s <input.ppm> <output.ppm> <M> <limiar> <sharpen_factor>\n", argv[0]);
+int read_next_int(FILE *f, int *out) {
+    int c;
+    while ((c = fgetc(f)) != EOF) {
+        if (isspace(c)) continue;
+        if (c == '#') {
+            while ((c = fgetc(f)) != EOF && c != '\n');
+            continue;
+        }
+        ungetc(c, f);
+        if (fscanf(f, "%d", out) == 1) return 1;
+        return 0;
+    }
+    return 0;
+}
+
+
+
+int main(int argc, char **argv) {
+    if (argc < 6 || argc > 7) {
+        fprintf(stderr, "Uso: %s entrada.ppm saida.ppm M limiar fator_sharpen [num_threads]\n", argv[0]);
         return 1;
     }
 
-    const char *input_filename = argv[1];
-    const char *output_filename = argv[2];
+    const char *infile = argv[1];
+    const char *outfile = argv[2];
     int M = atoi(argv[3]);
-    int limiar = atoi(argv[4]);
-    float sharpen_factor = atof(argv[5]);
+    int threshold = atoi(argv[4]);
+    double alpha = atof(argv[5]);
 
-    if (M < 1) {
-        fprintf(stderr, "Erro: M deve ser um inteiro maior ou igual a 1.\n");
+    if (argc == 7) {
+        int num_threads = atoi(argv[6]);
+        if (num_threads > 0) {
+            omp_set_num_threads(num_threads);
+        }
+    }
+    
+    if (M <= 0) {
+        fprintf(stderr, "Erro: M deve ser um número positivo.\n");
         return 1;
     }
-    if (limiar < 0 || limiar > 255) {
-        fprintf(stderr, "Erro: limiar deve ser um inteiro no intervalo [0, 255].\n");
-        return 1;
-    }
 
-    // 2. ABERTURA, LEITURA E ALOCAÇÃO (SEQUENCIAL)
-    FILE *inputFile = fopen(input_filename, "r");
-    if (!inputFile) {
-        perror("Erro ao abrir o arquivo de entrada");
+    FILE *fin = fopen(infile, "rb");
+    if (!fin) {
+        perror("Não foi possível abrir o arquivo de entrada");
         return 1;
     }
 
     char magic[3];
-    int width, height, max_val;
-    fscanf(inputFile, "%2s %d %d %d", magic, &width, &height, &max_val);
-    if (strcmp(magic, "P3") != 0) {
-        fprintf(stderr, "Erro: O arquivo de entrada não é um PPM P3 válido.\n");
-        fclose(inputFile);
+    if (fscanf(fin, "%2s", magic) != 1 || strcmp(magic, "P3") != 0) {
+        fprintf(stderr, "Erro: O formato do arquivo de entrada deve ser PPM (P3).\n");
+        fclose(fin);
         return 1;
     }
 
-    printf("Lendo imagem '%s' (%d x %d)...\n", input_filename, width, height);
-    printf("Parâmetros do filtro: M=%d, limiar=%d, sharpen_factor=%.2f\n", M, limiar, sharpen_factor);
-    
-    Pixel *original_image = (Pixel *)malloc(width * height * sizeof(Pixel));
-    unsigned char *grayscale_image = (unsigned char *)malloc(width * height * sizeof(unsigned char));
-    unsigned char *blurred_image = (unsigned char *)malloc(width * height * sizeof(unsigned char));
-    Pixel *final_image = (Pixel *)malloc(width * height * sizeof(Pixel));
-
-    if (!original_image || !grayscale_image || !blurred_image || !final_image) {
-        fprintf(stderr, "Erro: Falha ao alocar memória.\n");
-        // ... (código de liberação de memória)
+    int width, height, maxval;
+    if (!read_next_int(fin, &width) || !read_next_int(fin, &height) || !read_next_int(fin, &maxval)) {
+        fprintf(stderr, "Erro ao ler o cabeçalho da imagem.\n");
+        fclose(fin);
         return 1;
     }
 
-    for (int i = 0; i < width * height; i++) {
-        fscanf(inputFile, "%hhu %hhu %hhu", &original_image[i].r, &original_image[i].g, &original_image[i].b);
-    }
-    fclose(inputFile);
+    long total_pixels = width * height;
+    Pixel *image_original = malloc(total_pixels * sizeof(Pixel));
+    Pixel *image_blurred = malloc(total_pixels * sizeof(Pixel));
+    Pixel *image_sharpened = malloc(total_pixels * sizeof(Pixel));
+    unsigned char *image_final_gray = malloc(total_pixels * sizeof(unsigned char));
 
-    // Medição de tempo do processamento
+    if (!image_original || !image_blurred || !image_sharpened || !image_final_gray) {
+        perror("Falha na alocação de memória para as imagens");
+        fclose(fin);
+        free(image_original);
+        free(image_blurred);
+        free(image_sharpened);
+        free(image_final_gray);
+        return 1;
+    }
+
+    for (long i = 0; i < total_pixels; ++i) {
+        int r, g, b;
+        if (!read_next_int(fin, &r) || !read_next_int(fin, &g) || !read_next_int(fin, &b)) {
+            fprintf(stderr, "Erro ao ler o pixel %ld.\n", i);
+            fclose(fin);
+            free(image_original);
+            free(image_blurred);
+            free(image_sharpened);
+            free(image_final_gray);
+            return 1;
+        }
+        image_original[i].r = (unsigned char)r;
+        image_original[i].g = (unsigned char)g;
+        image_original[i].b = (unsigned char)b;
+    }
+    fclose(fin);
+
     double start_time = omp_get_wtime();
 
-    // --------------------------------------------------------------------------
-    // ETAPA 1: CONVERSÃO PARA TONS DE CINZA (PARALELO)
-    // --------------------------------------------------------------------------
-    #pragma omp parallel for
-    for (int i = 0; i < width * height; i++) {
-        grayscale_image[i] = (unsigned char)(0.299 * original_image[i].r + 0.587 * original_image[i].g + 0.114 * original_image[i].b);
-    }
-
-    // --------------------------------------------------------------------------
-    // ETAPA 2: DESFOQUE DE RAIO VARIÁVEL (PARALELO com schedule dinâmico)
-    // --------------------------------------------------------------------------
+    // O trabalho de aplicar o blur em cada pixel varia conforme o raio, que é dinâmico.
+    // Por isso, 'schedule(dynamic)' distribui as iterações do loop entre as threads
+    // de forma mais eficiente, evitando que threads fiquem ociosas.
     #pragma omp parallel for schedule(dynamic)
-    for (int y = 0; y < height; y++) {
-        for (int x = 0; x < width; x++) {
-            int current_pixel_idx = y * width + x;
-            Pixel p_orig = original_image[current_pixel_idx];
-            int radius = ((p_orig.r + p_orig.g + p_orig.b) % M) + 1;
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            long idx = y * width + x;
+            int rgb_sum = image_original[idx].r + image_original[idx].g + image_original[idx].b;
+            int radius = (rgb_sum % M) + 1;
 
-            long sum = 0;
+            long sum_r = 0, sum_g = 0, sum_b = 0;
             int count = 0;
-            for (int j = -radius; j <= radius; j++) {
-                for (int i = -radius; i <= radius; i++) {
-                    int neighbor_x = x + i;
-                    int neighbor_y = y + j;
-                    if (neighbor_x >= 0 && neighbor_x < width && neighbor_y >= 0 && neighbor_y < height) {
-                        sum += grayscale_image[neighbor_y * width + neighbor_x];
-                        count++;
-                    }
+
+            for (int dy = -radius; dy <= radius; ++dy) {
+                for (int dx = -radius; dx <= radius; ++dx) {
+                    int neighbor_x = x + dx;
+                    int neighbor_y = y + dy;
+
+                    // Trata as bordas da imagem
+                    if (neighbor_x < 0) neighbor_x = 0;
+                    if (neighbor_y < 0) neighbor_y = 0;
+                    if (neighbor_x >= width) neighbor_x = width - 1;
+                    if (neighbor_y >= height) neighbor_y = height - 1;
+
+                    long neighbor_idx = neighbor_y * width + neighbor_x;
+                    sum_r += image_original[neighbor_idx].r;
+                    sum_g += image_original[neighbor_idx].g;
+                    sum_b += image_original[neighbor_idx].b;
+                    count++;
                 }
             }
-            blurred_image[current_pixel_idx] = (unsigned char)(sum / count);
+            image_blurred[idx].r = clamp_byte((int)round((double)sum_r / count));
+            image_blurred[idx].g = clamp_byte((int)round((double)sum_g / count));
+            image_blurred[idx].b = clamp_byte((int)round((double)sum_b / count));
         }
     }
 
-    // --------------------------------------------------------------------------
-    // ETAPA 3: AJUSTE SELETIVO (PARALELO)
-    // --------------------------------------------------------------------------
+    // O filtro de nitidez (sharpen) é aplicado independentemente em cada pixel.
+    // Um 'parallel for' simples é ideal aqui, pois o custo por pixel é uniforme
+    // e não há dependência de dados entre as iterações.
     #pragma omp parallel for
-    for (int i = 0; i < width * height; i++) {
-        Pixel p_orig = original_image[i];
-        unsigned char blurred_val = blurred_image[i];
-
-        if (p_orig.r > limiar) {
-            float new_r = p_orig.r + sharpen_factor * (p_orig.r - blurred_val);
-            float new_g = p_orig.g + sharpen_factor * (p_orig.g - blurred_val);
-            float new_b = p_orig.b + sharpen_factor * (p_orig.b - blurred_val);
-            
-            final_image[i].r = clamp((int)round(new_r));
-            final_image[i].g = clamp((int)round(new_g));
-            final_image[i].b = clamp((int)round(new_b));
+    for (long i = 0; i < total_pixels; ++i) {
+        if (image_original[i].r > threshold) {
+            double new_r = image_original[i].r + alpha * (image_original[i].r - image_blurred[i].r);
+            double new_g = image_original[i].g + alpha * (image_original[i].g - image_blurred[i].g);
+            double new_b = image_original[i].b + alpha * (image_original[i].b - image_blurred[i].b);
+            image_sharpened[i].r = clamp_byte((int)round(new_r));
+            image_sharpened[i].g = clamp_byte((int)round(new_g));
+            image_sharpened[i].b = clamp_byte((int)round(new_b));
         } else {
-            final_image[i] = original_image[i];
+            image_sharpened[i] = image_blurred[i];
         }
     }
 
-    // --------------------------------------------------------------------------
-    // 3. ESCRITA DO ARQUIVO DE SAÍDA (SEQUENCIAL)
-    // --------------------------------------------------------------------------
-    printf("Escrevendo imagem de saída em '%s'...\n", output_filename);
-    FILE *outputFile = fopen(output_filename, "w");
-    if (!outputFile) {
-        perror("Erro ao criar o arquivo de saída");
-        // ... (código de liberação de memória)
+    // A conversão para tons de cinza também é uma operação feita pixel a pixel,
+    // sem dependências. O 'parallel for' divide o trabalho igualmente entre as
+    // threads disponíveis para acelerar o processo.
+    #pragma omp parallel for
+    for (long i = 0; i < total_pixels; ++i) {
+        double luminance = 0.299 * image_sharpened[i].r + 0.587 * image_sharpened[i].g + 0.114 * image_sharpened[i].b;
+        image_final_gray[i] = clamp_byte((int)round(luminance));
+    }
+
+    double end_time = omp_get_wtime();
+    printf("Tempo de processamento (OpenMP): %f segundos\n", end_time - start_time);
+
+    FILE *fout = fopen(outfile, "w");
+    if (!fout) {
+        perror("Não foi possível criar o arquivo de saída");
+        // Libera memória antes de sair
+        free(image_original);
+        free(image_blurred);
+        free(image_sharpened);
+        free(image_final_gray);
         return 1;
     }
 
-    fprintf(outputFile, "P3\n%d %d\n%d\n", width, height, max_val);
-    for (int i = 0; i < width * height; i++) {
-        fprintf(outputFile, "%d %d %d\n", final_image[i].r, final_image[i].g, final_image[i].b);
+    fprintf(fout, "P3\n%d %d\n255\n", width, height);
+    for (long i = 0; i < total_pixels; ++i) {
+        fprintf(fout, "%d %d %d ", image_final_gray[i], image_final_gray[i], image_final_gray[i]);
+        if ((i + 1) % width == 0) {
+            fprintf(fout, "\n");
+        }
     }
-    fclose(outputFile);
+    fclose(fout);
 
-    double end_time = omp_get_wtime();
-    printf("Tempo de processamento do filtro: %f segundos\n", end_time - start_time);
-
-    // 4. LIBERAÇÃO DE MEMÓRIA (SEQUENCIAL)
-    free(original_image);
-    free(grayscale_image);
-    free(blurred_image);
-    free(final_image);
-
-    printf("Filtro aplicado com sucesso!\n");
+    free(image_original);
+    free(image_blurred);
+    free(image_sharpened);
+    free(image_final_gray);
 
     return 0;
 }
