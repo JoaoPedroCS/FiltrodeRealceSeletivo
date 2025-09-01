@@ -1,7 +1,13 @@
-// filtro_sequencial_correto.c
-// Implementação sequencial do filtro de realce seletivo conforme o enunciado ep2.pdf
-// Uso: ./filtro_seq_correto entrada.ppm saida.ppm M limiar sharpen_factor
-// Ex:  ./filtro_seq_correto img_in.ppm img_out.ppm 7 180 1.2
+/* 
+E.P 2 - Filtro de Realce Seletivo
+ > Paralelização em CUDA
+
+João Pedro Corrêa Silva	        				R.A: 11202321629
+João Pedro Sousa Bianchim		    			R.A: 11201920729
+Thiago Vinícius Pereira Graciano de Souza   	R.A: 11201722589
+
+Professor: Emílio Francesquini
+*/
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -9,7 +15,7 @@
 #include <ctype.h>
 #include <math.h>
 
-// Estrutura para um pixel colorido
+// Estrutura RGB
 typedef struct {
     unsigned char r, g, b;
 } Pixel;
@@ -20,7 +26,7 @@ static inline unsigned char clamp_char(int v) {
     return (unsigned char)v;
 }
 
-// Lê o próximo inteiro do arquivo, pulando comentários '#' e espaços em branco
+// Lê o next int
 int read_next_int(FILE *f, int *out) {
     int c;
     while ((c = fgetc(f)) != EOF) {
@@ -31,14 +37,14 @@ int read_next_int(FILE *f, int *out) {
         }
         ungetc(c, f);
         if (fscanf(f, "%d", out) == 1) return 1;
-        return 0; // Falha na leitura
+        return 1;
     }
-    return 0; // Fim do arquivo
+    return 0;
 }
 
 int main(int argc, char **argv) {
     if (argc != 6) {
-        fprintf(stderr, "Uso: %s entrada.ppm saida.ppm M limiar sharpen_factor\n", argv[0]);
+        fprintf(stderr, "6 argumentos, ex: %s IN.ppm OUT.ppm 7 180 1.2\n", argv[0]);
         return 1;
     }
 
@@ -48,7 +54,7 @@ int main(int argc, char **argv) {
     int threshold = atoi(argv[4]);
     double alpha = atof(argv[5]);
 
-    if (M <= 0) { fprintf(stderr, "M deve ser > 0\n"); return 1; }
+    if (M <= 0) { fprintf(stderr, "M deve ser positivo !=0\n"); return 1; }
 
     FILE *fin = fopen(infile, "r");
     if (!fin) { perror("fopen entrada"); return 1; }
